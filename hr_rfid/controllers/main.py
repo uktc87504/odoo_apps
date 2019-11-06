@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from odoo import http, fields, exceptions
+from odoo import http, fields, exceptions, _
 from odoo.http import request
 import datetime
 import json
@@ -37,7 +37,7 @@ class WebRfidController(http.Controller):
 
         if len(processing_comm) > 0:
             processing_comm = processing_comm[-1]
-            self._retry_command(status_code, processing_comm, event)
+            return self._retry_command(status_code, processing_comm, event)
 
         command = commands_env.search([
             ('webstack_id', '=', self._webstack.id),
@@ -531,6 +531,9 @@ class WebRfidController(http.Controller):
 
     @http.route(['/hr/rfid/event'], type='json', auth='none', method=['POST'], csrf=False)
     def post_event(self, **post):
+        #####################
+        ###### +REMOVE ######
+        #####################
         self._post = post
         self._vending_hw_version = '16'
         self._webstacks_env = request.env['hr.rfid.webstack'].sudo()
@@ -539,6 +542,49 @@ class WebRfidController(http.Controller):
             'last_ip': request.httprequest.environ['REMOTE_ADDR'],
             'updated_at': fields.Datetime.now(),
         }
+        #####################
+        ###### -REMOVE ######
+        #####################
+
+        if 'convertor' not in post or 'key' not in post:
+            raise exceptions.ValidationError(_('Received a json request without the required fields:\n%s')
+                                             % json.dumps(post))
+
+        sys_ev_env = request.env['hr.rfid.event.system'].sudo()
+        ws_env = request.env['hr.rfid.webstack'].sudo()
+        ws = ws_env.search([ ('serial', '=', str(post['convertor'])) ])
+
+        if not ws:
+            ws_env.create({
+                'name': 'Module ' + str(post['convertor']),
+                'serial': str(post['convertor']),
+                'key': post['key'],
+                'last_ip': request.httprequest.environ['REMOTE_ADDR'],
+                'updated_at': fields.Datetime.now(),
+            })
+            return { 'status': 400 }
+
+        if ws.key != post['key']:
+            sys_ev_env.report(ws, post, 'Webstack key and key in json did not match')
+            return { 'status': 400 }
+
+        last_ip = request.httprequest.environ['REMOTE_ADDR']
+
+        try:
+            return ws.deal_with_event(post, last_ip)
+        except (KeyError, exceptions.UserError, exceptions.AccessError, exceptions.AccessDenied,
+                exceptions.MissingError, exceptions.ValidationError, exceptions.DeferredException) as __:
+            request.env['hr.rfid.event.system'].sudo().create({
+                'webstack_id': self._webstack.id,
+                'timestamp': fields.Datetime.now(),
+                'error_description': traceback.format_exc(),
+                'input_js': json.dumps(self._post),
+            })
+            return { 'status': 500 }
+
+        #####################
+        ###### +REMOVE ######
+        #####################
         try:
             if len(self._webstack) == 0:
                 new_webstack = {
