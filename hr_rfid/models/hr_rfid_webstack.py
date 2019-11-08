@@ -228,114 +228,6 @@ class HrRfidWebstack(models.Model):
     _sql_constraints = [ ('rfid_webstack_serial_unique', 'unique(serial)',
                           'Serial number for webstacks must be unique!') ]
 
-    @api.multi
-    def deal_with_ev(self, post, last_ip):
-        self.ensure_one()
-        sys_ev_env = self.env['hr.rfid.event.system']
-
-        if not self.ws_active:
-            ret = { 'status': 400 }
-        elif 'heartbeat' in post:
-            ret = self._parse_heartbeat(post)
-        elif 'event' in post:
-            ret = self._parse_event(post)
-        elif 'response' in post:
-            ret = self._parse_response(post)
-        else:
-            sys_ev_env.report(self, post, 'Webstack did not sent us a proper event.')
-            ret = { 'status': 400 }
-
-        self.write({
-            'last_ip': last_ip,
-            'updated_at': fields.Datetime.now(),
-        })
-        return ret
-
-    @api.multi
-    def check_for_unsent_cmd(self, status_code=200, event=None):
-        self.ensure_one()
-        commands_env = self.env['hr.rfid.command']
-
-        processing_comm = commands_env.search([
-            ('webstack_id', '=', self._webstack.id),
-            ('status', '=', 'Process'),
-        ])
-
-        if processing_comm:
-            processing_comm = processing_comm[-1]
-            return self.retry_command(processing_comm, status_code, event)
-
-        command = commands_env.search([
-            ('webstack_id', '=', self.id),
-            ('status', '=', 'Wait'),
-        ])
-
-        if not command:
-            return { 'status': status_code }
-
-        command = command[-1]
-
-        if event is not None:
-            event.command_id = command
-        return self.send_command(command, status_code)
-
-    @api.multi
-    def retry_command(self, cmd, status_code=200, event=None):
-        self.ensure_one()
-        if cmd.retries == 5:
-            cmd.status = 'Failure'
-            return self.check_for_unsent_cmd(status_code, event)
-
-        cmd.retries = cmd.retries + 1
-
-        if event is not None:
-            event.command_id = cmd
-        return self.send_command(cmd, status_code)
-
-    @api.multi
-    def send_command(self, cmd, status_code=200):
-        self.ensure_one()
-
-        cmd.status = 'Process'
-
-        json_cmd = {
-            'status': status_code,
-            'cmd': {
-                'id': cmd.controller_id.ctrl_id,
-                'c': cmd.cmd[:2],
-                'd': cmd.cmd_data,
-            }
-        }
-
-        if cmd.cmd == 'D1':
-            card_num = ''.join(list('0' + ch for ch in cmd.card_number))
-            pin_code = ''.join(list('0' + ch for ch in cmd.pin_code))
-            ts_code = str(cmd.ts_code)
-            rights_data = '{:02X}'.format(cmd.rights_data)
-            rights_mask = '{:02X}'.format(cmd.rights_mask)
-
-            json_cmd['cmd']['d'] = card_num + pin_code + ts_code + rights_data + rights_mask
-
-        if cmd.cmd == 'D7':
-            dt = datetime.now()
-            dt += self._get_tz_offset()
-
-            json_cmd['cmd']['d'] = '{:02}{:02}{:02}{:02}{:02}{:02}{:02}'.format(
-                dt.second, dt.minute, dt.hour, dt.weekday() + 1, dt.day, dt.month, dt.year % 100
-            )
-
-        cmd.request = json.dumps(json_cmd)
-
-        return json_cmd
-
-    @api.one
-    def action_set_active(self):
-        self.ws_active = True
-
-    @api.one
-    def action_set_inactive(self):
-        self.ws_active = False
-
     @api.one
     def action_set_webstack_settings(self):
         odoo_url = str(self.env['ir.config_parameter'].get_param('web.base.url'))
@@ -445,16 +337,128 @@ class HrRfidWebstack(models.Model):
         except KeyError as __:
             raise exceptions.ValidationError('Information returned by the webstack invalid')
 
+    @api.one
+    def action_set_active(self):
+        self.ws_active = True
+
+    @api.one
+    def action_set_inactive(self):
+        self.ws_active = False
+
+    ##################################################################################
+    ### All the functions bellow change data beyond this model, use them carefully ###
+    ##################################################################################
+
+    @api.multi
+    def deal_with_event(self, post, last_ip):
+        self.ensure_one()
+
+        if not self.ws_active:
+            ret = { 'status': 400 }
+        elif 'heartbeat' in post:
+            ret = self.parse_heartbeat(post)
+        elif 'event' in post:
+            ret = self.parse_event(post)
+        elif 'response' in post:
+            ret = self.parse_response(post)
+        else:
+            self.report_sys_ev(post, 'Webstack did not sent us a proper event.')
+            ret = { 'status': 400 }
+
+        self.write({
+            'last_ip': last_ip,
+            'updated_at': fields.Datetime.now(),
+        })
+        return ret
+
+    @api.multi
+    def check_for_unsent_cmd(self, status_code=200, event=None):
+        self.ensure_one()
+        commands_env = self.env['hr.rfid.command']
+
+        processing_comm = commands_env.search([
+            ('webstack_id', '=', self.id),
+            ('status', '=', 'Process'),
+        ])
+
+        if processing_comm:
+            processing_comm = processing_comm[-1]
+            return self.retry_command(processing_comm, status_code, event)
+
+        command = commands_env.search([
+            ('webstack_id', '=', self.id),
+            ('status', '=', 'Wait'),
+        ])
+
+        if not command:
+            return { 'status': status_code }
+
+        command = command[-1]
+
+        if event is not None:
+            event.command_id = command
+        return self.send_command(command, status_code)
+
+    @api.multi
+    def retry_command(self, cmd, status_code=200, event=None):
+        self.ensure_one()
+        if cmd.retries == 5:
+            cmd.status = 'Failure'
+            return self.check_for_unsent_cmd(status_code, event)
+
+        cmd.retries = cmd.retries + 1
+
+        if event is not None:
+            event.command_id = cmd
+        return self.send_command(cmd, status_code)
+
+    @api.multi
+    def send_command(self, cmd, status_code=200):
+        self.ensure_one()
+
+        cmd.status = 'Process'
+
+        json_cmd = {
+            'status': status_code,
+            'cmd': {
+                'id': cmd.controller_id.ctrl_id,
+                'c': cmd.cmd[:2],
+                'd': cmd.cmd_data,
+            }
+        }
+
+        if cmd.cmd == 'D1':
+            card_num = ''.join(list('0' + ch for ch in cmd.card_number))
+            pin_code = ''.join(list('0' + ch for ch in cmd.pin_code))
+            ts_code = str(cmd.ts_code)
+            rights_data = '{:02X}'.format(cmd.rights_data)
+            rights_mask = '{:02X}'.format(cmd.rights_mask)
+
+            json_cmd['cmd']['d'] = card_num + pin_code + ts_code + rights_data + rights_mask
+
+        if cmd.cmd == 'D7':
+            dt = datetime.now()
+            dt += self._get_tz_offset()
+
+            json_cmd['cmd']['d'] = '{:02}{:02}{:02}{:02}{:02}{:02}{:02}'.format(
+                dt.second, dt.minute, dt.hour, dt.weekday() + 1, dt.day, dt.month, dt.year % 100
+            )
+
+        cmd.request = json.dumps(json_cmd)
+
+        return json_cmd
+
     @api.multi
     def parse_heartbeat(self, post):
         self.ensure_one()
         self.version = str(post['FW'])
-        return self._check_for_unsent_cmd(200)
+        return self.check_for_unsent_cmd(200)
 
     @api.multi
     def parse_event(self, post):
         self.ensure_one()
-        controller = self.controllers.filtered(lambda r: r.ctrl_id == self._post['event']['id'])
+        controller = self.controllers.filtered(lambda r: r.ctrl_id == post['event']['id'])
+        vending_hw_version = '16'
 
         if not controller:
             ctrl_env = self.env['hr.rfid.ctrl']
@@ -479,6 +483,7 @@ class HrRfidWebstack(models.Model):
         reader = None
         event_action = post['event']['event_n']
 
+        # Power on event
         if event_action == 30:
             cmd_env = self.env['hr.rfid.command'].sudo()
             self.report_sys_ev('Controller restarted', controller)
@@ -507,11 +512,11 @@ class HrRfidWebstack(models.Model):
 
         ev_env = self.env['hr.rfid.event.user'].sudo()
 
-        if len(card) == 0:
-            if event_action == 64 and controller.hw_version != self._vending_hw_version:
-                cmd_env = request.env['hr.rfid.command'].sudo()
+        if not card:
+            if event_action == 64 and controller.hw_version != vending_hw_version:
+                cmd_env = self.env['hr.rfid.command'].sudo()
                 cmd = {
-                    'webstack_id': controller.webstack_id.id,
+                    'webstack_id': self.id,
                     'controller_id': controller.id,
                     'cmd': 'DB',
                     'status': 'Process',
@@ -519,43 +524,32 @@ class HrRfidWebstack(models.Model):
                     'cmd_data': '40%02X00' % (4 + 4*(reader.number - 1)),
                 }
                 cmd = cmd_env.create(cmd)
-                cmd_js = {
-                    'status': 200,
-                    'cmd': {
-                        'id': cmd.controller_id.ctrl_id,
-                        'c': cmd.cmd[:2],
-                        'd': cmd.cmd_data,
-                    }
-                }
-                cmd.request = json.dumps(cmd_js)
-                self._report_sys_ev('Could not find the card', controller)
-                return cmd_js
+                self.report_sys_ev('Could not find the card', controller)
+                return self.send_command(cmd, 200)
             elif event_action in [ 21, 22, 23, 24 ]:
                 event_dict = {
                     'ctrl_addr': controller.ctrl_id,
                     'door_id': reader.door_id.id,
                     'reader_id': reader.id,
-                    'event_time': self._get_ws_time_str(),
+                    'event_time': self.get_ws_time_str(post),
                     'event_action': '5',  # Exit button
                 }
                 event = ev_env.create(event_dict)
-                return self._check_for_unsent_cmd(200, event)
+                return self.check_for_unsent_cmd(200, event)
 
-            self._report_sys_ev('Could not find the card', controller)
-            return self._check_for_unsent_cmd(200)
+            self.report_sys_ev('Could not find the card', controller)
+            return self.check_for_unsent_cmd(200)
 
         # External db event, controller requests for permission to open or close door
-        if event_action == 64 and controller.hw_version != self._vending_hw_version:
-            ret = request.env['hr.rfid.access.group.door.rel'].sudo().search([
+        if event_action == 64 and controller.hw_version != vending_hw_version:
+            ret = self.env['hr.rfid.access.group.door.rel'].sudo().search([
                 ('access_group_id', 'in', card.get_owner().hr_rfid_access_group_ids.ids),
                 ('door_id', '=', reader.door_id.id)
             ])
-            # if len(ret) > 0: open door, else close
-            return self._respond_to_ev_64(len(ret) > 0 and card.card_active is True,
-                                          controller, reader, card)
+            return self.respond_to_ev_64(post, ret and card.card_active is True, controller, reader, card)
 
         # Turnstile controller. If the 7th bit is not up, then there was no actual entry
-        if controller.hw_version == '9' and (self._post['event']['reader'] & 64) == 0:
+        if controller.hw_version == '9' and (post['event']['reader'] & 64) == 0:
             event_action = 6
         else:
             event_action = ((event_action - 3) % 4) + 1
@@ -565,33 +559,355 @@ class HrRfidWebstack(models.Model):
             'door_id': reader.door_id.id,
             'reader_id': reader.id,
             'card_id': card.id,
-            'event_time': self._get_ws_time_str(),
+            'event_time': self.get_ws_time_str(post),
             'event_action': str(event_action),
         }
 
-        if reader.mode == '03' and controller.hw_version != self._vending_hw_version:  # Card and workcode
+        # Card and workcode
+        if reader.mode == '03' and controller.hw_version != vending_hw_version:
             wc = workcodes_env.search([
-                ('workcode', '=', self._post['event']['dt'])
+                ('workcode', '=', post['event']['dt'])
             ])
-            if len(wc) == 0:
-                event_dict['workcode'] = self._post['event']['dt']
+            if not wc:
+                event_dict['workcode'] = post['event']['dt']
             else:
                 event_dict['workcode_id'] = wc.id
 
         self._get_card_owner(event_dict, card)
         event = ev_env.create(event_dict)
 
-        return self._check_for_unsent_cmd(200, event)
+        return self.check_for_unsent_cmd(200, event)
 
     @api.multi
     def parse_response(self, post):
         self.ensure_one()
-        pass  # TODO Implement
+        command_env = self.env['hr.rfid.command'].sudo()
+        response = post['response']
+        controller = None
+
+        for ctrl in self.controllers:
+            if ctrl.ctrl_id == response['id']:
+                controller = ctrl
+                break
+
+        if controller is None:
+            self.report_sys_ev('Module sent us a response from a controller that does not exist')
+            return self.check_for_unsent_cmd(200)
+
+        command = command_env.search([ ('webstack_id', '=', self.id),
+                                       ('controller_id', '=', controller.id),
+                                       ('status', '=', 'Process'),
+                                       ('cmd', '=', response['c']), ], limit=1)
+
+        if not command and response['c'] == 'DB':
+            command = command_env.search([ ('webstack_id', '=', self.id),
+                                           ('controller_id', '=', controller.id),
+                                           ('status', '=', 'Process'),
+                                           ('cmd', '=', 'DB2'), ], limit=1)
+
+        if not command:
+            self.report_sys_ev('Controller sent us a response to a command we never sent')
+            return self.check_for_unsent_cmd(200)
+
+        if response['e'] != 0:
+            command.write({
+                'status': 'Failure',
+                'error': str(response['e']),
+                'ex_timestamp': fields.datetime.now(),
+                'response': json.dumps(post),
+            })
+            return self.check_for_unsent_cmd(200)
+
+        if response['c'] == 'F0':
+            self.parse_response_f0(post, command, controller)
+
+        if response['c'] == 'F6':
+            self.parse_response_f6(post, controller)
+
+        if response['c'] == 'F9':
+            self.parse_response_f9(post, controller)
+
+        command.write({
+            'status': 'Success',
+            'ex_timestamp': fields.datetime.now(),
+            'response': json.dumps(post),
+        })
+
+        return self.check_for_unsent_cmd(200)
 
     @api.multi
-    def report_sys_ev(self):
+    def parse_response_f0(self, post, command, controller):
         self.ensure_one()
-        pass
+        response = post['response']
+        data = response['d']
+        vending_hw_version = '16'
+
+        ctrl_mode = int(data[42:44], 16)
+        external_db = ctrl_mode & 0x20 > 0
+        ctrl_mode = ctrl_mode & 0x0F
+
+        if ctrl_mode < 1 or ctrl_mode > 4:
+            return self.log_cmd_error(post, 'F0 command failure, controller sent us a wrong mode',
+                                      command, '31', 200)
+
+        readers_count = int(data[30:32], 16)
+
+        mode_reader_relation = { 1: [2], 2: [2, 4], 3: [4], 4: [4] }
+
+        if readers_count not in mode_reader_relation[ctrl_mode]:
+            return self.log_cmd_error(post, 'F0 sent us a wrong reader-controller mode combination',
+                                      command, '31', 200)
+
+        reader_env = self.env['hr.rfid.reader'].sudo()
+        door_env = self.env['hr.rfid.door'].sudo()
+        ctrl_env = self.env['hr.rfid.ctrl'].sudo()
+
+        def bytes_to_num(start, digits):
+            digits = digits-1
+            res = 0
+            for j in range(digits+1):
+                multiplier = 10 ** (digits-j)
+                res = res + int(data[start:start+2], 16) * multiplier
+                start = start + 2
+            return res
+
+        hw_ver = str(bytes_to_num(0, 2))
+        serial_num = str(bytes_to_num(4, 4))
+        sw_ver = str(bytes_to_num(12, 3))
+        inputs = bytes_to_num(18, 3)
+        outputs = bytes_to_num(24, 3)
+        time_schedules = bytes_to_num(32, 2)
+        io_table_lines = bytes_to_num(36, 2)
+        alarm_lines = bytes_to_num(40, 1)
+        max_cards_count = bytes_to_num(44, 5)
+        max_events_count = bytes_to_num(54, 5)
+
+        old_ctrl = ctrl_env.search([
+            ('serial_number', '=', serial_num)
+        ], limit=1)
+
+        if old_ctrl:
+            old_ctrl.webstack_id = controller.webstack_id
+            controller.unlink()
+            return self.check_for_unsent_cmd(200)
+
+        if controller.reader_ids:
+            controller.reader_ids.unlink()
+
+        if controller.door_ids:
+            controller.door_ids.unlink()
+
+        def create_door(name, number, ctrl_id):
+            # If the controller is a vending controller
+            if hw_ver == vending_hw_version:
+                return None
+            return door_env.create({
+                'name': name,
+                'number': number,
+                'controller_id': ctrl_id,
+            }).id
+
+        def create_reader(name, number, reader_type, ctrl_id, door_id):
+            create_dict = {
+                'name': name,
+                'number': number,
+                'reader_type': reader_type,
+                'controller_id': ctrl_id,
+            }
+
+            if door_id is not None:
+                create_dict['door_id'] = door_id
+
+            reader_env.create(create_dict)
+
+        def gen_d_name(door_num, controller_id):
+            return 'Door ' + str(door_num) + ' of ctrl ' + str(controller_id)
+
+        if ctrl_mode == 1 or ctrl_mode == 3:
+            last_door = create_door(gen_d_name(1, controller.id), 1, controller.id)
+            create_reader('R1', 1, '0', controller.id, last_door)
+            create_reader('R2', 2, '1', controller.id, last_door)
+        elif ctrl_mode == 2 and readers_count == 4:
+            last_door = create_door(gen_d_name(1, controller.id), 1, controller.id)
+            create_reader('R1', 1, '0', controller.id, last_door)
+            create_reader('R2', 2, '1', controller.id, last_door)
+            last_door = create_door(gen_d_name(2, controller.id), 2, controller.id)
+            create_reader('R3', 3, '0', controller.id, last_door)
+            create_reader('R4', 4, '1', controller.id, last_door)
+        else:  # (ctrl_mode == 2 and readers_count == 2) or ctrl_mode == 4
+            last_door = create_door(gen_d_name(1, controller.id), 1, controller.id)
+            create_reader('R1', 1, '0', controller.id, last_door)
+            last_door = create_door(gen_d_name(2, controller.id), 2, controller.id)
+            create_reader('R2', 2, '0', controller.id, last_door)
+
+        if ctrl_mode == 3:
+            last_door = create_door(gen_d_name(2, controller.id), 2, controller.id)
+            create_reader('R3', 3, '0', controller.id, last_door)
+            last_door = create_door(gen_d_name(3, controller.id), 3, controller.id)
+            create_reader('R4', 4, '0', controller.id, last_door)
+        elif ctrl_mode == 4:
+            last_door = create_door(gen_d_name(3, controller.id), 3, controller.id)
+            create_reader('R3', 3, '0', controller.id, last_door)
+            last_door = create_door(gen_d_name(4, controller.id), 4, controller.id)
+            create_reader('R4', 4, '0', controller.id, last_door)
+
+        controller.write({
+            'name': 'Controller ' + serial_num + ' ' + str(controller.ctrl_id),
+            'hw_version': hw_ver,
+            'serial_number': serial_num,
+            'sw_version': sw_ver,
+            'inputs': inputs,
+            'outputs': outputs,
+            'readers': readers_count,
+            'time_schedules': time_schedules,
+            'io_table_lines': io_table_lines,
+            'alarm_lines': alarm_lines,
+            'mode': ctrl_mode,
+            'external_db': external_db,
+            'max_cards_count': max_cards_count,
+            'max_events_count': max_events_count,
+        })
+
+        cmd_env = self.env['hr.rfid.command'].sudo()
+        cmd_env.create({
+            'webstack_id': self.id,
+            'controller_id': controller.id,
+            'cmd': 'D7',
+        })
+
+        cmd_env.create({
+            'webstack_id': self.id,
+            'controller_id': controller.id,
+            'cmd': 'DC',
+            'cmd_data': '0303',
+        })
+
+        cmd_env.create({
+            'webstack_id': self.id,
+            'controller_id': controller.id,
+            'cmd': 'DC',
+            'cmd_data': '0404',
+        })
+
+        cmd_env.create({
+            'webstack_id': self.id,
+            'controller_id': controller.id,
+            'cmd': 'F6',
+        })
+
+        cmd_env.create({
+            'webstack_id': self.id,
+            'controller_id': controller.id,
+            'cmd': 'F9',
+            'cmd_data': '00'
+        })
+
+    @api.multi
+    def parse_response_f6(self, post, controller):
+        self.ensure_one()
+        response = post['response']
+        data = response['d']
+        readers = [None, None, None, None]
+        for it in controller.reader_ids:
+            readers[it.number-1] = it
+        for i in range(4):
+            if readers[i] is not None:
+                mode = str(data[i*6:i*6+2])
+                readers[i].write({
+                    'mode': mode,
+                    'no_d6_cmd': True,
+                })
+
+    @api.multi
+    def parse_response_f9(self, post, controller):
+        self.ensure_one()
+        response = post['response']
+        controller.write({
+            'io_table': response['d']
+        })
+
+    @api.multi
+    def report_sys_ev(self, post, description, controller=None):
+        self.ensure_one()
+        sys_ev_env = self.env['hr.rfid.event.system'].sudo()
+
+        sys_ev = {
+            'webstack_id': self.id,
+            'timestamp': self.get_ws_time_str(post),
+            'error_description': description,
+            'input_js': json.dumps(post),
+        }
+        if 'event' in post and 'event_n' in post['event']:
+            sys_ev['event_action'] = str(post['event']['event_n']),
+        if controller is not None:
+            sys_ev['controller_id'] = controller.id
+
+        sys_ev_env.create(sys_ev)
+
+    @api.multi
+    def respond_to_ev_64(self, post, open_door: bool, controller, reader, card):
+        self.ensure_one()
+        cmd_env = self.env['hr.rfid.command'].sudo()
+        ev_env = self.env['hr.rfid.event.user'].sudo()
+        open_door = 3 if open_door is True else 4
+        cmd = {
+            'webstack_id': self.id,
+            'controller_id': controller.id,
+            'cmd': 'DB',
+            'status': 'Process',
+            'ex_timestamp': fields.Datetime.now(),
+            'cmd_data': '40%02X00' % (open_door + 4*(reader.number - 1)),
+        }
+        event = {
+            'ctrl_addr': controller.ctrl_id,
+            'door_id': reader.door_id.id,
+            'reader_id': reader.id,
+            'card_id': card.id,
+            'event_time': self.get_ws_time_str(post),
+            'event_action': '64',
+        }
+        self._get_card_owner(event, card)
+        cmd = cmd_env.create(cmd)
+        event['command_id'] = cmd.id
+        ev_env.create(event)
+        return self.send_command(cmd, 200)
+
+    @api.multi
+    def log_cmd_error(self, post, description, command, error, status_code):
+        self.ensure_one()
+        command.write({
+            'status': 'Failure',
+            'error': error,
+            'ex_timestamp': fields.datetime.now(),
+            'response': json.dumps(post),
+        })
+
+        self.report_sys_ev(post, description, command.controller_id)
+        return self.check_for_unsent_cmd(status_code)
+
+    @api.multi
+    def get_ws_time_str(self, post):
+        self.ensure_one()
+        return self.get_ws_time(post).strftime('%m.%d.%y %H:%M:%S')
+
+    @api.multi
+    def get_ws_time(self, post):
+        self.ensure_one()
+        time = post['event']['date'] + ' ' + post['event']['time']
+        time = datetime.strptime(time, '%m.%d.%y %H:%M:%S')
+        time -= self._get_tz_offset()
+        return time
+
+    @staticmethod
+    def _get_card_owner(event_dict: dict, card):
+        if not card.employee_id:
+            event_dict['contact_id'] = card.contact_id.id
+        else:
+            event_dict['employee_id'] = card.employee_id.id
+
+    #################################################################################
+    ### All the functions above change data beyond this model, use them carefully ###
+    #################################################################################
 
     @api.depends('tz')
     def _compute_tz_offset(self):
@@ -1651,20 +1967,6 @@ class HrRfidSystemEvent(models.Model):
     )
 
     @api.model
-    def report(self, webstack, post, description, controller=None):
-        sys_ev = {
-            'webstack_id': webstack.id,
-            'timestamp': webstack.calc_time(post),
-            'error_description': description,
-            'input_js': json.dumps(post),
-        }
-        if controller is not None:
-            sys_ev['controller_id'] = controller.id
-        if 'event' in post and 'event_n' in post['event']:
-            sys_ev['event_action'] = str(self._post['event']['event_n'])
-        self.create([sys_ev])
-
-    @api.model
     def delete_old_events(self):
         event_lifetime = self.env['ir.config_parameter'].get_param('hr_rfid.event_lifetime')
         if event_lifetime is None:
@@ -1739,7 +2041,7 @@ class HrRfidSystemEventWizard(models.TransientModel):
 
     card_number = fields.Char(
         string='Card Number',
-        default =_default_card_number,
+        default=_default_card_number,
     )
 
     card_type = fields.Many2one(
