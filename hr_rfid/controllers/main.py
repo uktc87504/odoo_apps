@@ -29,7 +29,6 @@ class WebRfidController(http.Controller):
             'status': 'Failure',
             'error': error,
             'ex_timestamp': fields.datetime.now(),
-            'response': json.dumps(self._post),
         })
 
         WebRfidController.report_sys_ev(description, command.controller_id)
@@ -149,7 +148,6 @@ class WebRfidController(http.Controller):
                         'd': cmd.cmd_data,
                     }
                 }
-                cmd.request = json.dumps(cmd_js)
                 self._report_sys_ev('Could not find the card', controller)
                 return cmd_js
             elif event_action in [ 21, 22, 23, 24 ]:
@@ -239,7 +237,6 @@ class WebRfidController(http.Controller):
                 'status': 'Failure',
                 'error': str(response['e']),
                 'ex_timestamp': fields.datetime.now(),
-                'response': json.dumps(self._post),
             })
             return self._check_for_unsent_cmd(200)
 
@@ -440,7 +437,6 @@ class WebRfidController(http.Controller):
         command.write({
             'status': 'Success',
             'ex_timestamp': fields.datetime.now(),
-            'response': json.dumps(self._post),
         })
 
         return self._check_for_unsent_cmd(200)
@@ -490,7 +486,6 @@ class WebRfidController(http.Controller):
                 'd': cmd.cmd_data,
             }
         }
-        cmd.request = json.dumps(cmd_js)
         event['command_id'] = cmd.id
         ev_env.create(event)
         return cmd_js
@@ -549,8 +544,6 @@ class WebRfidController(http.Controller):
             json_cmd['cmd']['d'] = '{:02}{:02}{:02}{:02}{:02}{:02}{:02}'.format(
                 dt.second, dt.minute, dt.hour, dt.weekday() + 1, dt.day, dt.month, dt.year % 100
             )
-
-        command.request = json.dumps(json_cmd)
 
         return json_cmd
 

@@ -1791,16 +1791,6 @@ class HrRfidCommands(models.Model):
         help='Time at which the module returned a response from the command',
     )
 
-    request = fields.Char(
-        string='Request',
-        help='Request json sent to the module'
-    )
-
-    response = fields.Char(
-        string='Response',
-        help='Response json sent from the module',
-    )
-
     card_number = fields.Char(
         string='Card',
         help='Card the command will do an operation for',
