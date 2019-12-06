@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 
-<odoo>
+<openerp>
   <data>
     <record id="hr_employee_acc_grs_add_form" model="ir.ui.view">
       <field name="name">hr.employee.acc.grs.add.form</field>
@@ -123,4 +123,4 @@
       </field>
     </record>
   </data>
-</odoo>
+</openerp>

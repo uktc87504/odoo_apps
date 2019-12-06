@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
-from odoo import http, fields, exceptions
-from odoo.http import request
+from openerp import http, fields, exceptions
+from openerp.http import request
 import datetime
 import json
 import traceback

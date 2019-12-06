@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from odoo import api, fields, models, exceptions
+from openerp import api, fields, models, exceptions
 
 
 class HrRfidWorkcode(models.Model):

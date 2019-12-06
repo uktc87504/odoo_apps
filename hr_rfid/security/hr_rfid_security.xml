@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 
-<odoo>
+<openerp>
   <data>
 
     <record id="hr_rfid_management" model="ir.module.category">
@@ -107,4 +107,4 @@
     </record>
 
   </data>
-</odoo>
+</openerp>

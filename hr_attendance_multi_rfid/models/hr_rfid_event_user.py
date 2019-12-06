@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from odoo import models, api, fields
+from openerp import models, api, fields
 
 
 class HrRfidUserEvent(models.Model):

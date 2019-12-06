@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Copyright 2018 Tecnativa - Pedro M. Baeza
      License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl). -->
-<odoo>
+<openerp>
     <record id="hr_attendance_theoretical_view_filter" model="ir.ui.view">
         <field name="model">hr.attendance.theoretical.time.report</field>
         <field name="arch" type="xml">
@@ -70,4 +70,4 @@
               sequence="20"
     />
 
-</odoo>
+</openerp>

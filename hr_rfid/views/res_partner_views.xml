@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 
-<odoo>
+<openerp>
   <data>
     <record id="res_partner_acc_grs_add_form" model="ir.ui.view">
       <field name="name">res.partner.acc.grs.add.form</field>
@@ -122,4 +122,4 @@
       </field>
     </record>
   </data>
-</odoo>
+</openerp>

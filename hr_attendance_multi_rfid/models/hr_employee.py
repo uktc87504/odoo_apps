@@ -1,4 +1,4 @@
-from odoo import models, exceptions, _, api, fields
+from openerp import models, exceptions, _, api, fields
 
 
 class HrEmployee(models.Model):
